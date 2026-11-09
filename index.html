@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>สถานะเสี่ยงน้ำท่วม</title>
+<style>
+:root{--bg:#f3f5f7;--card:#fff;--tx:#12171d;--mut:#5a6572;--bd:#d9dee4;--ok:#e6ebf0;--red:#e5484d;--org:#f76b15;--yel:#f5d90a;--acc:#1d4ed8;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1217;--card:#171c23;--tx:#eef1f5;--mut:#9aa5b3;--bd:#2a323c;--ok:#222a34;--acc:#7aa7ff;color-scheme:dark}}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,"Noto Sans Thai","Sarabun",sans-serif}
+main{max-width:520px;margin:0 auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:12px}
+#bn{font-weight:700;font-size:1.1rem;border-radius:10px;padding:14px;margin-bottom:12px;background:var(--ok)}
+#bn.l1{background:var(--yel);color:#1a1a1a}#bn.l2{background:var(--org);color:#1a1a1a}#bn.l3{background:var(--red);color:#fff}
+#g{display:grid;gap:4px}
+.c{aspect-ratio:1;border:2px solid transparent;border-radius:6px;background:var(--ok);color:var(--tx);font:inherit;font-size:.78rem;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.c.l1{background:var(--yel);color:#1a1a1a}.c.l2{background:var(--org);color:#1a1a1a}.c.l3{background:var(--red);color:#fff}
+.c.sel{border-color:var(--tx)}
+.mut{color:var(--mut);font-size:.85rem}
+a{color:var(--acc)}
+ul{margin:6px 0 0;padding-left:18px;font-size:.88rem}
+</style>
+</head>
+<body>
+<main>
+<div id="bn">กำลังโหลด…</div>
+<div class="card"><div id="g"></div></div>
+<div class="card" id="d"><span class="mut">แตะช่องเพื่อดูรายละเอียด</span></div>
+<div class="card"><b>เหตุการณ์ล่าสุด</b><ul id="h"></ul><p class="mut" id="u"></p></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const NM=['ปกติ','เหลือง: ยังมีโอกาส','ส้ม: โอกาสสูง','แดง: ท่วมแล้ว'];
+let T=new URLSearchParams(location.search).get('t');
+try{if(T)localStorage.setItem('t',T);else T=localStorage.getItem('t')}catch(e){}
+if(!T)T=prompt('ใส่ชื่อ topic ของ ntfy')||'';
+let D=null,sel=-1;
+const tm=t=>new Date(t*1000).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+const nm=i=>String.fromCharCode(65+i%D.n)+((i/D.n|0)+1);
+async function load(){
+  try{
+    const r=await fetch('https://ntfy.sh/'+encodeURIComponent(T)+'-state/json?poll=1&since=12h');
+    const E=(await r.text()).trim().split('\n').filter(Boolean).map(x=>JSON.parse(x)).filter(e=>e.event==='message');
+    if(!E.length){D=null;$('#bn').className='';$('#bn').textContent='ไม่มีเหตุการณ์ใน 12 ชั่วโมงล่าสุด (ปกติ)';$('#g').innerHTML='';$('#h').innerHTML='';return}
+    const rd=e=>{const p=e.message.split('|');return{n:+p[0],m:+p[1],lat:+p[2],lng:+p[3],lv:p[4].split('').map(Number),el:p[5].split(',').map(Number),t:e.time}};
+    D=rd(E[E.length-1]);
+    const mx=Math.max(...D.lv);
+    $('#bn').className='l'+mx;$('#bn').textContent=NM[mx]+' · อัปเดต '+tm(D.t);
+    $('#h').innerHTML=E.slice(-6).reverse().map(e=>{const x=rd(e);return'<li>'+tm(x.t)+' — '+NM[Math.max(...x.lv)]+'</li>'}).join('');
+    $('#u').textContent='รีเฟรชอัตโนมัติทุก 30 วินาที';
+    draw();
+  }catch(e){$('#bn').textContent='เชื่อมต่อ ntfy ไม่ได้'}
+}
+function draw(){
+  if(!D)return;
+  $('#g').style.gridTemplateColumns='repeat('+D.n+',1fr)';
+  $('#g').innerHTML=D.lv.map((v,i)=>'<button class="c l'+v+(i==sel?' sel':'')+'" onclick="pick('+i+')">'+nm(i)+'</button>').join('');
+  if(sel<0)return;
+  const n=D.n,mid=(n-1)/2,r=sel/n|0,c=sel%n;
+  const la=D.lat+(mid-r)*D.m/111320,lo=D.lng+(c-mid)*D.m/(111320*Math.cos(D.lat*Math.PI/180));
+  $('#d').innerHTML='<b>ช่อง '+nm(sel)+'</b> · '+NM[D.lv[sel]]+'<div class="mut">ความสูง '+D.el[sel].toFixed(2)+' ม.<br>พิกัด '+la.toFixed(5)+', '+lo.toFixed(5)+'<br><a target="_blank" rel="noopener" href="https://www.google.com/maps?q='+la+','+lo+'">เปิดใน Google Maps</a></div>';
+}
+function pick(i){sel=i;draw()}
+load();setInterval(load,30000);
+</script>
+</body>
+</html>
