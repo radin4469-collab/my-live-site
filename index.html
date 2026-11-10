@@ -4,65 +4,97 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>สถานะเสี่ยงน้ำท่วม</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
 :root{--bg:#f3f5f7;--card:#fff;--tx:#12171d;--mut:#5a6572;--bd:#d9dee4;--ok:#e6ebf0;--red:#e5484d;--org:#f76b15;--yel:#f5d90a;--acc:#1d4ed8;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root{--bg:#0e1217;--card:#171c23;--tx:#eef1f5;--mut:#9aa5b3;--bd:#2a323c;--ok:#222a34;--acc:#7aa7ff;color-scheme:dark}}
 *,*::before,*::after{box-sizing:inherit}
 body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,"Noto Sans Thai","Sarabun",sans-serif}
-main{max-width:520px;margin:0 auto;padding:14px}
+main{max-width:620px;margin:0 auto;padding:14px}
+h1{font-size:1.2rem;margin:2px 0 10px}
 .card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:12px}
-#bn{font-weight:700;font-size:1.1rem;border-radius:10px;padding:14px;margin-bottom:12px;background:var(--ok)}
+#ch{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:4px}
+.chip{flex:none;font:inherit;font-size:.9rem;padding:7px 12px;border-radius:99px;border:1px solid var(--bd);background:var(--card);color:var(--tx);cursor:pointer}
+.chip.on{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.chip i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+#bn{font-weight:700;border-radius:10px;padding:12px;margin-bottom:12px;background:var(--ok)}
 #bn.l1{background:var(--yel);color:#1a1a1a}#bn.l2{background:var(--org);color:#1a1a1a}#bn.l3{background:var(--red);color:#fff}
-#g{display:grid;gap:4px}
-.c{aspect-ratio:1;border:2px solid transparent;border-radius:6px;background:var(--ok);color:var(--tx);font:inherit;font-size:.78rem;display:flex;align-items:center;justify-content:center;cursor:pointer}
-.c.l1{background:var(--yel);color:#1a1a1a}.c.l2{background:var(--org);color:#1a1a1a}.c.l3{background:var(--red);color:#fff}
-.c.sel{border-color:var(--tx)}
+#map{height:320px;border-radius:10px;margin-bottom:12px;border:1px solid var(--bd)}
+.tt{background:transparent;border:0;box-shadow:none;font-size:11px;font-weight:700;color:#000;text-shadow:0 0 3px #fff}
 .mut{color:var(--mut);font-size:.85rem}
 a{color:var(--acc)}
 ul{margin:6px 0 0;padding-left:18px;font-size:.88rem}
+code{background:var(--ok);padding:1px 6px;border-radius:5px;font-size:.85rem;word-break:break-all}
 </style>
 </head>
 <body>
 <main>
+<h1>สถานะเสี่ยงน้ำท่วม</h1>
+<div id="ch"></div>
 <div id="bn">กำลังโหลด…</div>
-<div class="card"><div id="g"></div></div>
-<div class="card" id="d"><span class="mut">แตะช่องเพื่อดูรายละเอียด</span></div>
-<div class="card"><b>เหตุการณ์ล่าสุด</b><ul id="h"></ul><p class="mut" id="u"></p></div>
+<div id="map"></div>
+<div class="card" id="d"><span class="mut">แตะช่องบนแผนที่เพื่อดูรายละเอียด</span></div>
+<div class="card"><b>เหตุการณ์ล่าสุด</b><ul id="h"></ul><p class="mut">รีเฟรชอัตโนมัติทุก 30 วินาที · สีแดง = ท่วมแล้ว, ส้ม = โอกาสสูง, เหลือง = ยังมีโอกาส, เทา = ปกติ · 📡 = ช่องที่มีเซนเซอร์</p></div>
+<details class="card"><summary>ตั้งค่า topic ของแต่ละพื้นที่</summary><div id="setup"></div>
+<p class="mut">เพิ่มพื้นที่ใหม่: เพิ่มรายการใน AREAS ทั้งในไฟล์นี้และใน flood_calc.py โดยใช้ topic คนละชื่อ</p></details>
 </main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
+// ===== รายชื่อพื้นที่ (ต้องตรงกับ AREAS ใน flood_calc.py) =====
+const AREAS=[
+  {name:'โรงเรียนไชยวานวิทยา',topic:'flood-chaiyawan-7k2x9q',lat:17.2867,lng:103.2233,n:5,m:40,nodes:['C3']}
+  // ,{name:'ชื่อพื้นที่ถัดไป',topic:'flood-xxxxx-ชื่อสุ่ม',lat:0,lng:0,n:5,m:40,nodes:['C3']}
+];
+// =============================================================
 const $=s=>document.querySelector(s);
-const NM=['ปกติ','เหลือง: ยังมีโอกาส','ส้ม: โอกาสสูง','แดง: ท่วมแล้ว'];
-let T=new URLSearchParams(location.search).get('t');
-try{if(T)localStorage.setItem('t',T);else T=localStorage.getItem('t')}catch(e){}
-if(!T)T=prompt('ใส่ชื่อ topic ของ ntfy')||'';
-let D=null,sel=-1;
+const NM=['ปกติ','เหลือง: ยังมีโอกาส','ส้ม: โอกาสสูง','แดง: ท่วมแล้ว'],COL=['#7d8b99','#f5d90a','#f76b15','#e5484d'];
+const qt=new URLSearchParams(location.search).get('t');
+let cur=Math.max(0,AREAS.findIndex(a=>a.topic===qt)),sel=-1,map,lay,fitted=-1,D={};
 const tm=t=>new Date(t*1000).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-const nm=i=>String.fromCharCode(65+i%D.n)+((i/D.n|0)+1);
-async function load(){
+const nm=(a,i)=>String.fromCharCode(65+i%a.n)+((i/a.n|0)+1);
+const cl=(a,i)=>{const n=a.n,mid=(n-1)/2,r=i/n|0,c=i%n;return[a.lat+(mid-r)*a.m/111320,a.lng+(c-mid)*a.m/(111320*Math.cos(a.lat*Math.PI/180))]};
+const last=a=>{const E=D[a.topic];const x=E&&E[E.length-1];return x&&x.lv.length==a.n*a.n?x:null};
+const lvOf=a=>D[a.topic]===null?0:Math.max(0,...(last(a)||{lv:[0]}).lv);
+async function fetchArea(a){
   try{
-    const r=await fetch('https://ntfy.sh/'+encodeURIComponent(T)+'-state/json?poll=1&since=12h');
-    const E=(await r.text()).trim().split('\n').filter(Boolean).map(x=>JSON.parse(x)).filter(e=>e.event==='message');
-    if(!E.length){D=null;$('#bn').className='';$('#bn').textContent='ไม่มีเหตุการณ์ใน 12 ชั่วโมงล่าสุด (ปกติ)';$('#g').innerHTML='';$('#h').innerHTML='';return}
-    const rd=e=>{const p=e.message.split('|');return{n:+p[0],m:+p[1],lat:+p[2],lng:+p[3],lv:p[4].split('').map(Number),el:p[5].split(',').map(Number),t:e.time}};
-    D=rd(E[E.length-1]);
-    const mx=Math.max(...D.lv);
-    $('#bn').className='l'+mx;$('#bn').textContent=NM[mx]+' · อัปเดต '+tm(D.t);
-    $('#h').innerHTML=E.slice(-6).reverse().map(e=>{const x=rd(e);return'<li>'+tm(x.t)+' — '+NM[Math.max(...x.lv)]+'</li>'}).join('');
-    $('#u').textContent='รีเฟรชอัตโนมัติทุก 30 วินาที';
-    draw();
-  }catch(e){$('#bn').textContent='เชื่อมต่อ ntfy ไม่ได้'}
+    const r=await fetch('https://ntfy.sh/'+encodeURIComponent(a.topic)+'-state/json?poll=1&since=12h');
+    D[a.topic]=(await r.text()).trim().split('\n').filter(Boolean).map(x=>JSON.parse(x)).filter(e=>e.event==='message')
+      .map(e=>{const p=e.message.split('|');return{lv:p[4].split('').map(Number),el:p[5].split(',').map(Number),t:e.time}});
+  }catch(e){D[a.topic]=null}
 }
-function draw(){
-  if(!D)return;
-  $('#g').style.gridTemplateColumns='repeat('+D.n+',1fr)';
-  $('#g').innerHTML=D.lv.map((v,i)=>'<button class="c l'+v+(i==sel?' sel':'')+'" onclick="pick('+i+')">'+nm(i)+'</button>').join('');
-  if(sel<0)return;
-  const n=D.n,mid=(n-1)/2,r=sel/n|0,c=sel%n;
-  const la=D.lat+(mid-r)*D.m/111320,lo=D.lng+(c-mid)*D.m/(111320*Math.cos(D.lat*Math.PI/180));
-  $('#d').innerHTML='<b>ช่อง '+nm(sel)+'</b> · '+NM[D.lv[sel]]+'<div class="mut">ความสูง '+D.el[sel].toFixed(2)+' ม.<br>พิกัด '+la.toFixed(5)+', '+lo.toFixed(5)+'<br><a target="_blank" rel="noopener" href="https://www.google.com/maps?q='+la+','+lo+'">เปิดใน Google Maps</a></div>';
+function drawMap(a,lv){
+  if(typeof L==='undefined')return;
+  if(!map){
+    map=L.map('map');
+    const o=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+    const s=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'});
+    L.control.layers({'แผนที่':o,'ดาวเทียม':s}).addTo(map);lay=L.layerGroup().addTo(map);
+  }
+  lay.clearLayers();
+  const dl=a.m/2/111320,dg=a.m/2/(111320*Math.cos(a.lat*Math.PI/180)),mid=(a.n-1)/2;
+  lv.forEach((v,i)=>{
+    const[p,q]=cl(a,i),nd=a.nodes.includes(nm(a,i));
+    L.rectangle([[p-dl,q-dg],[p+dl,q+dg]],{color:i==sel?'#fff':COL[v],weight:i==sel?3:1,fillColor:COL[v],fillOpacity:v?0.55:0.12})
+      .on('click',()=>{sel=i;render()}).bindTooltip(nm(a,i)+(nd?' 📡':''),{permanent:true,direction:'center',className:'tt'}).addTo(lay);
+  });
+  if(fitted!==cur){fitted=cur;map.fitBounds([[a.lat-a.n*dl,a.lng-a.n*dg],[a.lat+a.n*dl,a.lng+a.n*dg]]);setTimeout(()=>map.invalidateSize(),50)}
 }
-function pick(i){sel=i;draw()}
-load();setInterval(load,30000);
+function render(){
+  const a=AREAS[cur],E=D[a.topic],L1=last(a),lv=L1?L1.lv:Array(a.n*a.n).fill(0),mx=Math.max(...lv);
+  $('#ch').innerHTML=AREAS.map((x,i)=>'<button class="chip'+(i==cur?' on':'')+'" onclick="go('+i+')"><i style="background:'+COL[lvOf(x)]+'"></i>'+x.name+'</button>').join('');
+  $('#bn').className='l'+mx;
+  $('#bn').textContent=a.name+' — '+(E===null?'เชื่อมต่อ ntfy ไม่ได้':L1?NM[mx]+' · อัปเดต '+tm(L1.t):'ไม่มีเหตุการณ์ใน 12 ชั่วโมงล่าสุด (ปกติ)');
+  drawMap(a,lv);
+  if(sel>=0){
+    const[la,lo]=cl(a,sel);
+    $('#d').innerHTML='<b>ช่อง '+nm(a,sel)+'</b> · '+NM[lv[sel]]+'<div class="mut">'+(L1?'ความสูง '+L1.el[sel].toFixed(2)+' ม.<br>':'')+'พิกัด '+la.toFixed(5)+', '+lo.toFixed(5)+'<br><a target="_blank" rel="noopener" href="https://www.google.com/maps?q='+la+','+lo+'">เปิดใน Google Maps</a></div>';
+  }
+  $('#h').innerHTML=(E||[]).slice(-6).reverse().map(x=>'<li>'+tm(x.t)+' — '+NM[Math.max(...x.lv)]+'</li>').join('')||'<li class="mut">ยังไม่มีเหตุการณ์</li>';
+}
+function go(i){cur=i;sel=-1;$('#d').innerHTML='<span class="mut">แตะช่องบนแผนที่เพื่อดูรายละเอียด</span>';render()}
+$('#setup').innerHTML=AREAS.map(a=>'<p><b>'+a.name+'</b><br>ใส่ <code>TOPIC = "'+a.topic+'"</code> ใน ESP32 ทุกตัวของพื้นที่นี้ และใน flood_calc.py<br>โทรศัพท์: ในแอป ntfy subscribe <code>'+a.topic+'</code><br>ช่องที่มีเซนเซอร์: '+a.nodes.join(', ')+'</p>').join('');
+async function refresh(){await Promise.all(AREAS.map(fetchArea));render()}
+refresh();setInterval(refresh,30000);
 </script>
 </body>
 </html>
