@@ -6,7 +6,7 @@
 import json, math, time, urllib.request
 
 # ===== ตั้งค่า =====
-WEB = "https://USERNAME.github.io/flood/live.html"
+WEB = "https://radin4469-collab.github.io/my-live-site/"
 STALE_MIN = 45      # เซนเซอร์เงียบเกินกี่นาทีถึงเตือนว่าหาย (ควรมากกว่ารอบ heartbeat 30 นาที)
 POLL_SEC = 60
 
