@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>สถานะเสี่ยงน้ำท่วม</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--bg:#f3f5f7;--card:#fff;--tx:#12171d;--mut:#5a6572;--bd:#d9dee4;--ok:#e6ebf0;--red:#e5484d;--org:#f76b15;--yel:#f5d90a;--acc:#1d4ed8;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1217;--card:#171c23;--tx:#eef1f5;--mut:#9aa5b3;--bd:#2a323c;--ok:#222a34;--acc:#7aa7ff;color-scheme:dark}}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,"Noto Sans Thai","Sarabun",sans-serif}
+main{max-width:620px;margin:0 auto;padding:14px}
+h1{font-size:1.2rem;margin:2px 0 10px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:12px}
+#ch{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px}
+.chip{flex:none;font:inherit;font-size:.9rem;padding:7px 12px;border-radius:99px;border:1px solid var(--bd);background:var(--card);color:var(--tx);cursor:pointer}
+.chip.on{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.chip i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+#bn{font-weight:700;border-radius:10px;padding:12px;margin-bottom:12px;background:var(--ok)}
+#bn.l1{background:var(--yel);color:#1a1a1a}#bn.l2{background:var(--org);color:#1a1a1a}#bn.l3{background:var(--red);color:#fff}
+#map{height:340px;border-radius:10px;margin-bottom:12px;border:1px solid var(--bd)}
+.tt{background:transparent;border:0;box-shadow:none;font-size:11px;line-height:1.15;font-weight:700;color:#000;text-shadow:0 0 3px #fff;text-align:center}
+.lg{display:flex;gap:12px;flex-wrap:wrap;font-size:.82rem;color:var(--mut)}
+.lg i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.mut{color:var(--mut);font-size:.85rem}
+button.b{font:inherit;font-size:.9rem;padding:7px 12px;border-radius:8px;border:1px solid var(--acc);background:var(--acc);color:#fff;cursor:pointer;margin-top:6px}
+@media (prefers-color-scheme:dark){button.b{color:#0e1217}}
+a{color:var(--acc)}
+ul{margin:6px 0 0;padding-left:18px;font-size:.88rem}
+code{background:var(--ok);padding:1px 6px;border-radius:5px;font-size:.85rem;word-break:break-all;user-select:all}
+.ok{color:#168a3d;font-weight:700}
+</style>
+</head>
+<body>
+<main>
+<h1>สถานะเสี่ยงน้ำท่วม</h1>
+<div id="ch"></div>
+<div id="bn">กำลังโหลด…</div>
+<div id="map"></div>
+<div class="card"><div class="lg"><span><i style="background:var(--red)"></i>แดง = ท่วมแล้ว</span><span><i style="background:var(--org)"></i>ส้ม = โอกาสสูง</span><span><i style="background:var(--yel)"></i>เหลือง = ยังมีโอกาส</span><span>📡 = ช่องที่มีบอร์ด</span><span>×N = เคยท่วม N ครั้ง</span></div>
+<p class="mut">โอกาสท่วมคำนวณจาก ระยะห่างจากจุดที่ท่วม + ความสูงพื้นที่ + ประวัติว่าช่องไหนเคยท่วมพร้อมกัน แตะช่องเพื่อดูรายละเอียด</p></div>
+<div class="card" id="d"><span class="mut">แตะช่องบนแผนที่ แตะช่องที่มีบอร์ด (📡) จะคัดลอก topic ของบอร์ดนั้นให้อัตโนมัติ</span></div>
+<div class="card"><b>ประวัติน้ำท่วม</b>
+<p class="mut" style="margin:6px 0 0">ช่องที่เคยท่วม</p><ul id="hs"></ul>
+<p class="mut" style="margin:10px 0 0">เหตุการณ์ล่าสุด</p><ul id="he"></ul></div>
+<details class="card"><summary>ตั้งค่า topic ของแต่ละบอร์ด</summary><div id="setup"></div></details>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ===== รายชื่อพื้นที่ (ต้องตรงกับ AREAS ใน flood_calc.py) =====
+const AREAS=[
+  {name:'โรงเรียนไชยวานวิทยา',topic:'flood-chaiyawan-7k2x9q',lat:17.2867,lng:103.2233,n:5,m:40,
+   boards:[{cell:'C3',topic:'flood-chaiyawan-7k2x9q-c3'}]}
+];
+// ============================================================
+const $=s=>document.querySelector(s);
+const NM=['ปกติ','🟡 ยังมีโอกาส','🟠 โอกาสสูง','🔴 น้ำท่วมแล้ว'],COL=['#7d8b99','#f5d90a','#f76b15','#e5484d'];
+const qt=new URLSearchParams(location.search).get('t');
+let cur=Math.max(0,AREAS.findIndex(a=>a.topic===qt)),sel=-1,note='',map,lay,fitted=-1,D={};
+const tm=t=>new Date(t*1000).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+const nm=(a,i)=>String.fromCharCode(65+i%a.n)+((i/a.n|0)+1);
+const cl=(a,i)=>{const n=a.n,mid=(n-1)/2,r=i/n|0,c=i%n;return[a.lat+(mid-r)*a.m/111320,a.lng+(c-mid)*a.m/(111320*Math.cos(a.lat*Math.PI/180))]};
+const board=(a,i)=>a.boards.find(b=>b.cell===nm(a,i));
+const stOf=a=>{const s=(D[a.topic]||{}).st;return s&&s.lv.length==a.n*a.n?s:null};
+async function ev(t){const r=await fetch('https://ntfy.sh/'+encodeURIComponent(t)+'/json?poll=1&since=12h');return(await r.text()).trim().split('\n').filter(Boolean).map(x=>JSON.parse(x)).filter(e=>e.event==='message')}
+async function fetchArea(a){
+  try{
+    const[s,h]=await Promise.all([ev(a.topic+'-state'),ev(a.topic+'-hist')]);
+    const x=s[s.length-1];let st=null,hh=null;
+    if(x){const p=x.message.split('|');st={t:x.time,lv:p[4].split('').map(Number),el:p[5]==='-'?null:p[5].split(',').map(Number),rk:p[6]?p[6].split(',').map(Number):null}}
+    if(h.length){try{hh=JSON.parse(h[h.length-1].message)}catch(e){}}
+    D[a.topic]={ok:true,st,h:hh};
+  }catch(e){D[a.topic]={ok:false}}
+}
+function drawMap(a,lv,H){
+  if(typeof L==='undefined')return;
+  if(!map){
+    map=L.map('map').setView([a.lat,a.lng],17);
+    const o=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+    const s=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'});
+    L.control.layers({'แผนที่':o,'ดาวเทียม':s}).addTo(map);lay=L.layerGroup().addTo(map);
+  }
+  lay.clearLayers();
+  const dl=a.m/2/111320,dg=a.m/2/(111320*Math.cos(a.lat*Math.PI/180));
+  lv.forEach((v,i)=>{
+    const[p,q]=cl(a,i),c=H&&H.c[nm(a,i)],cn=c?c[0]:0;
+    L.rectangle([[p-dl,q-dg],[p+dl,q+dg]],{color:i==sel?'#fff':cn?'#1a1a1a':COL[v],weight:i==sel?3:cn?2:1,dashArray:cn&&i!=sel?'4':null,fillColor:COL[v],fillOpacity:v?0.55:0.12})
+      .on('click',()=>tap(i)).bindTooltip(nm(a,i)+(board(a,i)?'📡':'')+(cn?'<br>×'+cn:''),{permanent:true,direction:'center',className:'tt'}).addTo(lay);
+  });
+  if(fitted!==cur){fitted=cur;map.fitBounds([[a.lat-a.n*dl,a.lng-a.n*dg],[a.lat+a.n*dl,a.lng+a.n*dg]]);setTimeout(()=>map.invalidateSize(),50)}
+}
+function cp(t){
+  if(!navigator.clipboard){note='คัดลอกอัตโนมัติไม่ได้ ให้กดค้างที่ topic เพื่อคัดลอกเอง';render();return}
+  navigator.clipboard.writeText(t).then(()=>{note='ok';render()},()=>{note='คัดลอกอัตโนมัติไม่ได้ ให้กดค้างที่ topic เพื่อคัดลอกเอง';render()});
+}
+function tap(i){sel=i;note='';const b=board(AREAS[cur],i);if(b)cp(b.topic);else render()}
+function render(){
+  const a=AREAS[cur],d=D[a.topic]||{},st=stOf(a),H=d.h,N2=a.n*a.n;
+  const lv=st?st.lv:Array(N2).fill(0),mx=Math.max(...lv),stale=st&&Date.now()/1000-st.t>45*60;
+  $('#ch').innerHTML=AREAS.map((z,i)=>'<button class="chip'+(i==cur?' on':'')+'" onclick="go('+i+')"><i style="background:'+COL[stOf(z)?Math.max(...stOf(z).lv):0]+'"></i>'+z.name+'</button>').join('');
+  $('#bn').className='l'+mx;
+  $('#bn').textContent=a.name+' — '+(d.ok===false?'เชื่อมต่อ ntfy ไม่ได้':!st?'ยังไม่พบข้อมูลจากตัวคำนวณ (flood_calc.py ยังไม่ทำงาน หรือ topic ไม่ตรง)':NM[mx]+' · อัปเดต '+tm(st.t)+(stale?' ⚠ ตัวคำนวณเงียบเกิน 45 นาที ตรวจสอบว่าคอมยังเปิดอยู่':''));
+  drawMap(a,lv,H);
+  if(sel>=0){
+    const i=sel,[la,lo]=cl(a,i),b=board(a,i),c=H&&H.c[nm(a,i)];
+    let near=null;
+    if(!b)a.boards.forEach(x=>{const k=x.cell.charCodeAt(0)-65,r=parseInt(x.cell.slice(1))-1,dd=Math.hypot(k-i%a.n,r-(i/a.n|0));if(!near||dd<near.d)near={d:dd,b:x}});
+    $('#d').innerHTML='<b>ช่อง '+nm(a,i)+(b?' 📡':'')+'</b> · '+NM[lv[i]]
+      +'<div class="mut">'+(st&&st.rk?'โอกาสท่วม '+st.rk[i]+'%<br>':'')+(st&&st.el?'ความสูง '+st.el[i].toFixed(2)+' ม.<br>':'')
+      +(c?'เคยท่วม '+c[0]+' ครั้ง'+(c[1]?' · ล่าสุด '+tm(c[1]):''):'ยังไม่มีบันทึกว่าเคยท่วม')+'<br>พิกัด '+la.toFixed(5)+', '+lo.toFixed(5)+' · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q='+la+','+lo+'">Google Maps</a></div>'
+      +(b?'<p style="margin:8px 0 0">บอร์ดช่องนี้ใช้ topic: <code>'+b.topic+'</code></p>'+(note==='ok'?'<div class="ok">✓ คัดลอก topic แล้ว</div>':note?'<div class="mut">'+note+'</div>':'')+'<button class="b" onclick="cp(\''+b.topic+'\')">คัดลอกอีกครั้ง</button><p class="mut" style="margin:6px 0 0">ใส่ topic นี้ในโค้ด ESP32 ของบอร์ดนี้ หรือ subscribe ในแอป ntfy เพื่อรับแจ้งเตือนโซนนี้</p>'
+        :near?'<p class="mut" style="margin:8px 0 0">ช่องนี้ไม่มีบอร์ด ดูแลโดยบอร์ด '+near.b.cell+' (ใกล้สุด) <button class="b" onclick="cp(\''+near.b.topic+'\')">คัดลอก topic บอร์ด '+near.b.cell+'</button></p>'+(note==='ok'?'<div class="ok">✓ คัดลอก topic แล้ว</div>':''):'');
+  }
+  const top=H?Object.entries(H.c).sort((x,y)=>y[1][0]-x[1][0]).slice(0,8):[];
+  $('#hs').innerHTML=top.length?top.map(([c,v])=>'<li><b>'+c+'</b> · เคยท่วม '+v[0]+' ครั้ง'+(v[1]?' · ล่าสุด '+tm(v[1]):'')+'</li>').join(''):'<li class="mut">ยังไม่มีบันทึก</li>';
+  const eps=H?H.e.slice().reverse():[];
+  $('#he').innerHTML=(H&&H.o?'<li>🔴 กำลังเกิดอยู่ ตั้งแต่ '+tm(H.o[0])+' · '+Object.keys(H.o[1]).join(', ')+'</li>':'')
+    +eps.map(e=>'<li>'+tm(e[0])+' – '+tm(e[1])+' · '+Object.entries(e[2]).map(([c,v])=>c+(v==3?'🔴':'🟠')).join(' ')+'</li>').join('')
+    ||'<li class="mut">ยังไม่มีเหตุการณ์</li>';
+}
+function go(i){cur=i;sel=-1;note='';$('#d').innerHTML='<span class="mut">แตะช่องบนแผนที่ แตะช่องที่มีบอร์ด (📡) จะคัดลอก topic ของบอร์ดนั้นให้อัตโนมัติ</span>';render()}
+$('#setup').innerHTML=AREAS.map(a=>'<p><b>'+a.name+'</b><br>topic หลัก (ผู้ดูแลรับทุกแจ้งเตือน): <code>'+a.topic+'</code>'+a.boards.map(b=>'<br>บอร์ดช่อง '+b.cell+': <code>'+b.topic+'</code>').join('')+'</p>').join('')
+  +'<p class="mut">แต่ละบอร์ดใส่ topic ของตัวเองในโค้ด ESP32 (พร้อม CELL ให้ตรงช่อง) และใส่รายการเดียวกันใน AREAS ของ flood_calc.py โทรศัพท์ subscribe topic ของบอร์ดใกล้บ้านเพื่อรับแจ้งเตือนเฉพาะโซนนั้น</p>';
+async function refresh(){await Promise.all(AREAS.map(fetchArea));render()}
+refresh();setInterval(refresh,30000);
+</script>
+</body>
+</html>
